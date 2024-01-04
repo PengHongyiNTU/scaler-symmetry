@@ -1,0 +1,7 @@
+# Ignore specific directories
+data/
+different_dropout/
+different_initialization/
+
+# Ignore files with .pkl extension
+pkl/
