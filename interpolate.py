@@ -20,7 +20,7 @@ def interpolate_weights(
     new_model_state_dict = {}
     with torch.no_grad():
         for param_name in model1_state_dict:
-            assert param_name in model2_state_dict, f"Model structure mismatch: {name}"
+            assert param_name in model2_state_dict, f"Model structure mismatch: {param_name}"
             param1 = model1_state_dict[param_name].to("cpu")
             param2 = model2_state_dict[param_name].to("cpu")
             new_model_state_dict[param_name] = (
