@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
-from torchvision import datasets, transforms
+from torchvision import datasets
 from typing import Literal, Tuple
+import torchvision.transforms.v2 as transforms
 
 
 def build_mlp_model(hidden_dimension: int = 128) -> nn.Module:

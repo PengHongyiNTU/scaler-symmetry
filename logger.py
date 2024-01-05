@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import List
 import os
 import wandb
+import pandas as pd
 
 
 class BaseLogger(ABC):
@@ -129,7 +130,7 @@ class CSVLogger(BaseLogger):
                 summary[col] = None
         return summary
 
-class WandbLogger(BaseLogger, typing.Iterable):
+class WandbLogger(BaseLogger):
     def __init__(self, project_name: str, run_name: str):
         super().__init__()
         self.project_name = project_name
@@ -164,7 +165,7 @@ class WandbLogger(BaseLogger, typing.Iterable):
         return self.run.summary._as_dict()
 
 
-class LoggerCollection(BaseLogger):
+class LoggerCollection(BaseLogger,  typing.Iterable):
     def __init__(self, loggers: List[BaseLogger]) -> None:
         super().__init__()
         assert len(loggers) > 0, "Must provide at least one logger"

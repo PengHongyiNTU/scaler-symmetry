@@ -1,3 +1,8 @@
+import sys
+import os 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 import unittest
 from parallel import ParallelExecutor, SpecGenerator, TaskSpec
 
@@ -43,7 +48,6 @@ class TestParallelExecutor(unittest.TestCase):
             task_num = int(result.id.split("_")[1])
             expected_sum = task_num + (task_num + 1)
             self.assertEqual(result.results, expected_sum)
-        executor.close()
 
     def test_with_spec_generator(self):
         executor = ParallelExecutor()
@@ -53,8 +57,9 @@ class TestParallelExecutor(unittest.TestCase):
             task_num = int(result.id.split("_")[1])
             expected_sum = task_num + (task_num + 1)
             self.assertEqual(result.results, expected_sum)
-        executor.close()
 
 
 if __name__ == "__main__":
+    import ray
     unittest.main()
+    ray.shutdown()

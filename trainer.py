@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from typing import Optional, Literal
+from typing import Optional, Literal, Union, Dict
 import tqdm
 from torchmetrics import MetricCollection
 from logger import BaseLogger
@@ -36,15 +36,15 @@ class BaseTrainer(ABC):
         pass
 
     @abstractmethod
-    def train_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
+    def train_step(self, batch: tuple[torch.Tensor, ...]) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         pass
 
     @abstractmethod
-    def val_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
+    def val_step(self, batch: tuple[torch.Tensor, ...]) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         pass
 
     @abstractmethod
-    def test_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
+    def test_step(self, batch: tuple[torch.Tensor, ...]) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         pass
 
     @abstractmethod
@@ -89,6 +89,20 @@ class DefaultTrainer(BaseTrainer):
             self.saving_dir = saving_dir
             self.saving_name = saving_name
 
+    def log(self, 
+            to_log: Union[torch.Tensor, Dict[str, torch.tensor]],
+            stage: Literal["train", "val", "test"] = "train",
+            when: Literal["step", "epoch"] = "step"):
+        prefix = f"{stage}_{when}"
+        if when == "step" and self.step % self.log_interval == 0:
+            formatted_log = self._format_log_data(to_log, prefix)
+            self.loggers.log(formatted_log, self.step)
+        elif when == "epoch":
+            formatted_log = self._format_log_data(to_log, prefix)
+            self.loggers.log(formatted_log, self.step)
+                        
+        
+    
     def train_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
         self.step += 1
         self.optimizer.zero_grad()
@@ -99,15 +113,9 @@ class DefaultTrainer(BaseTrainer):
         loss = self.criterion(outputs, targets)
         loss.backward()
         self.optimizer.step()
-        # update the metrics calculation
         metrics = self.metrics(outputs, targets)
-        if self.step % self.log_interval == 0:
-            # log metrics
-            prefix = "train_step"
-            metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
-            metrics["train_step_loss"] = loss.item()
-            self.loggers.log(metrics, self.step)
-        return loss
+        # update the metrics calculation
+        return {'loss': loss, **metrics}
 
     def val_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
         with torch.no_grad():
@@ -117,11 +125,11 @@ class DefaultTrainer(BaseTrainer):
             outputs = self.model(inputs)
             loss = self.criterion(outputs, targets)
             self.metrics(outputs, targets)
-            return loss
+            return {"loss": loss}
 
     def test_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
         loss = self.val_step(batch)
-        return loss
+        return {"loss": loss}
 
     def fit(
             self,
@@ -136,41 +144,36 @@ class DefaultTrainer(BaseTrainer):
         self.model.to(self.device)
         for epoch in range(epochs):
             pbar = tqdm.tqdm(train_loader)
-            epoch_loss = 0.0
+            train_epoch_loss = 0.0
             # training loop
             for batch in pbar:
-                train_loss = self.train_step(batch)
-                pbar.set_description(f"Epoch {epoch} - loss: {train_loss.item():.4f}")
-                epoch_loss += train_loss.item()
+                train_step_results = self.train_step(batch)
+                self.log(train_step_results, stage="train", when="step")
+                train_loss = train_step_results["loss"]
+                pbar.set_description(f"Epoch {epoch} - loss: {train_loss:.4f}")
+                train_epoch_loss += train_loss
             # traing epoch ends
             # compute metrics
-            train_results = self.metrics.compute()
-            prefix = "train_epoch"
-            train_results = {
-                f"{prefix}_{k}": v.cpu().item() for k, v in train_results.items()
-            }
-            train_results["train_epoch_loss"] = epoch_loss / len(train_loader)
-            # log metrics
-            self.loggers.log(train_results, self.step)
+            train_epoch_results = self.metrics.compute()
+            train_epoch_loss = train_epoch_loss / len(train_loader)
+            train_epoch_results['loss'] = train_epoch_loss
+            self.log(train_epoch_results, stage="train", when="epoch")
             self.metrics.reset()
             if val_loader:
                 print("Validation Starts")
                 self.model.eval()
                 val_epoch_loss = 0.0
                 for batch in tqdm.tqdm(val_loader):
-                    val_loss = self.val_step(batch)
-                    val_epoch_loss += val_loss.item()
-                val_results = self.metrics.compute()
-                prefix = "val_epoch"
-                val_results = {
-                    f"{prefix}_{k}": v.cpu.item() for k, v in val_results.items()
-                }
-                val_results["val_epoch_loss"] = val_epoch_loss / len(val_loader)
-                self.loggers.log(val_results, self.step)
+                    val_step_results = self.val_step(batch)
+                    val_loss = val_step_results["loss"]
+                    val_epoch_loss += val_loss
+                val_epoch_results = self.metrics.compute()
+                val_epoch_results["loss"] = val_epoch_loss / len(val_loader)
+                self.log(val_epoch_results, stage="val", when="epoch")
                 self.metrics.reset()
                 if self.saving_on == "best":
-                    if val_results["val_epoch_loss"] < best_val_loss:
-                        best_val_loss = val_results["val_epoch_loss"]
+                    if val_epoch_results["loss"] < best_val_loss:
+                        best_val_loss = val_epoch_results["loss"]
                         self.save() if self.need_saving else None
             if self.saving_on == "every_epoch":
                 self.save() if self.need_saving else None
@@ -179,10 +182,10 @@ class DefaultTrainer(BaseTrainer):
         self.loggers.flush()
         self.loggers.close()
         print("Training Ends")
-        assert train_results is not None, "Error in the training loop"
+        assert train_epoch_results is not None, "Error in the training loop"
         print(f"Training Results: {train_results}")
         if val_loader:
-            assert val_results is not None, "Error in the validation loop"
+            assert val_epoch_results is not None, "Error in the validation loop"
             print(f"Validation Results: {val_results}")
         fitting_summary = {}
         try:
@@ -199,16 +202,16 @@ class DefaultTrainer(BaseTrainer):
         test_epoch_loss = 0.0
         pbar = tqdm.tqdm(data_loader)
         for batch in pbar:
-            test_loss = self.test_step(batch)
-            test_epoch_loss += test_loss.item()
-        results = self.metrics.compute()
-        prefix = "test_epoch"
-        test_results = {f"{prefix}_{k}": v.cpu().item() for k, v in results.items()}
-        test_results["test_epoch_loss"] = test_epoch_loss / len(data_loader)
+            test_step_results = self.test_step(batch)
+            test_loss = test_step_results["loss"]
+            test_epoch_loss += test_loss
+        test_epoch_results = self.metrics.compute()
+        test_epoch_results["loss"] = test_epoch_loss / len(data_loader)
+        self.log(test_epoch_results, stage="test", when="epoch")
         self.metrics.reset()
         print("Evaluation Ends")
-        print(f"Test Results: {test_results}")
-        return test_results
+        print(f"Test Results: {test_epoch_results}")
+        return test_epoch_results
 
     def predict(self, data_loader: DataLoader) -> torch.Tensor:
         self.model.eval()

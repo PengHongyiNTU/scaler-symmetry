@@ -38,9 +38,6 @@ class ParallelExecutor:
         self.mode = mode
         return self
 
-    def close(self):
-        ray.shutdown()
-
     def run(
         self,
         func: Callable,
