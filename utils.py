@@ -23,7 +23,7 @@ def prepare_dataset(
         train_transforms = transforms.Compose(
             [
                 transforms.ToImage(),
-                transforms.RandomRotation(7),
+                transforms.RandomRotation((-7, 7)),
                 transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize((0.5,), (0.5,)),
                 transforms.Lambda(

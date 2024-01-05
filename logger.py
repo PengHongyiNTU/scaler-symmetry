@@ -159,9 +159,11 @@ class WandbLogger(BaseLogger):
         wandb.finish()
 
     def _get_wandb_run(self):
-        return wandb.run
+        assert self.run is not None, "Wandb run is not initialized."
+        return self.run
     
     def _get_fitting_summary(self):
+        assert self.run is not None, "Wandb run is not initialized."
         return self.run.summary._as_dict()
 
 
@@ -171,6 +173,7 @@ class LoggerCollection(BaseLogger,  typing.Iterable):
         assert len(loggers) > 0, "Must provide at least one logger"
         assert isinstance(loggers, list), "loggers must be a list of loggers"
         self.loggers = loggers
+        self._logger_iter = iter(self.loggers)
 
     def log(self, payload: dict, step) -> None:
         for logger in self.loggers:
@@ -185,10 +188,10 @@ class LoggerCollection(BaseLogger,  typing.Iterable):
             logger.close()
 
     def __iter__(self):
-        return iter(self.loggers)
+        return self
 
     def __next__(self):
-        return next(self.loggers)
+        return next(self._logger_iter)
 
     def _get_fitting_summary(self) -> dict:
         summary = {}
@@ -200,7 +203,8 @@ class LoggerCollection(BaseLogger,  typing.Iterable):
             if wandb_run is None:
                 raise Exception("WandbLogger found, but error in getting the wandb run.")
             summary = wandb_run.summary._as_dict()
-            return self._format_wandb_summary(summary)
+            if isinstance(summary, dict):
+                return self._format_wandb_summary(summary)
 
         # Check for CSVLogger
         csv_logger = next((logger for logger in self.loggers if isinstance(logger, CSVLogger)), None)

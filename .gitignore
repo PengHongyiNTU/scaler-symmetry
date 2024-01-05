@@ -5,3 +5,5 @@ different_initialization/
 
 # Ignore files with .pkl extension
 pkl/
+wandb/
+

@@ -1,4 +1,4 @@
-from typing import List, Callable, Iterator, Literal, Dict, Any, NamedTuple
+from typing import List, Callable, Iterator, Literal, Dict, Any, NamedTuple, Optional
 import ray
 from collections import namedtuple
 from abc import ABC, abstractmethod
@@ -16,20 +16,20 @@ class TaskResults(NamedTuple):
 
 
 class SpecGenerator(ABC):
+    def __iter__(self):
+        return self
+    
     @abstractmethod
-    def __iter__(self) -> Iterator[TaskSpec]:
-        pass
-
-    def __next__(self) -> TaskSpec:
+    def __next__(self)-> TaskSpec:
         pass
 
 
 class ParallelExecutor:
-    def __init__(self):
+    def __init__(self, gpu_fraction: float = 0.5, mode: Literal["debug", "release"] = "debug"):
         if not ray.is_initialized():
             ray.init()
-        self.gpu_fraction = 0.5
-        self.mode = "debug"
+        self.gpu_fraction = gpu_fraction
+        self.mode = mode
 
     def __call__(
         self, gpu_fraction: float = 0.5, mode: Literal["debug", "release"] = "debug"
@@ -41,8 +41,8 @@ class ParallelExecutor:
     def run(
         self,
         func: Callable,
-        task_specs: List[TaskSpec] = None,
-        spec_generator: SpecGenerator = None,
+        task_specs: Optional[List[TaskSpec]] = None,
+        spec_generator: Optional[SpecGenerator] = None,
     ) -> List[TaskResults]:
         if task_specs is None:
             assert spec_generator, "Must provide either spec_generator or task_specs"
@@ -66,12 +66,14 @@ class ParallelExecutor:
             ]
         except KeyboardInterrupt as e:
             print("Caught keyboard interrupt. Terminating workers.")
-            ray.cancel(object_refs, force=True)
+            for obejct_ref in object_refs.values():
+                ray.cancel(obejct_ref, force=True)
             raise e
         except Exception as e:
             print("Caught exception: {}. Terminating workers.".format(e))
             if self.mode == "debug":
-                ray.cancel(object_refs, force=True)
+                for obejct_ref in object_refs.values():
+                    ray.cancel(obejct_ref, force=True)
             raise e
         print("Finished running tasks")
         return results

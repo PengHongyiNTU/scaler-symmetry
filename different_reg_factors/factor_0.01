@@ -1,0 +1,3 @@
+step,train_step_loss,train_step_reg_loss,train_step_MulticlassAccuracy,train_epoch_MulticlassAccuracy,train_epoch_loss
+100,0.2890382707118988,44.65524673461914,0.90234375,,
+200,0.26370468735694885,44.518165588378906,0.9140625,,

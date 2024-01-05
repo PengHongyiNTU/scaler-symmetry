@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from typing import Optional, Literal, Union, Dict
 import tqdm
 from torchmetrics import MetricCollection
-from logger import BaseLogger
+from logger import LoggerCollection, CSVLogger, WandbLogger
 from abc import ABC, abstractmethod
 import os
 import wandb
@@ -63,13 +63,13 @@ class DefaultTrainer(BaseTrainer):
             optimizer: optim.Optimizer,
             criterion: torch.nn.Module,
             metrics: MetricCollection,
-            loggers: BaseLogger,
+            loggers: LoggerCollection,
             device: torch.device,
             log_interval: int = 100,
             need_saving: bool = True,
-            saving_on: Optional[Literal["best", "last", "every_epoch"]] = "last",
-            saving_dir: Optional[str] = "checkpoints",
-            saving_name: Optional[str] = "model",
+            saving_on: Literal["best", "last", "every_epoch"] = "last",
+            saving_dir: str = "checkpoints",
+            saving_name: str = "model",
     ) -> None:
         super().__init__()
         self.model = model
@@ -89,8 +89,16 @@ class DefaultTrainer(BaseTrainer):
             self.saving_dir = saving_dir
             self.saving_name = saving_name
 
+    def _format_log_data(self, to_log: Union[torch.Tensor, Dict[str, torch.Tensor]], 
+                          prefix: str) -> dict:
+        if isinstance(to_log, torch.Tensor):
+            return {f"{prefix}_loss": to_log}
+        elif isinstance(to_log, dict):
+            return {f"{prefix}_{key}": value for key, value in to_log.items()}
+    
+    
     def log(self, 
-            to_log: Union[torch.Tensor, Dict[str, torch.tensor]],
+            to_log:  Dict[str, torch.Tensor],
             stage: Literal["train", "val", "test"] = "train",
             when: Literal["step", "epoch"] = "step"):
         prefix = f"{stage}_{when}"
@@ -103,7 +111,7 @@ class DefaultTrainer(BaseTrainer):
                         
         
     
-    def train_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
+    def train_step(self, batch: tuple[torch.Tensor, ...]) -> Dict[str, torch.Tensor]:
         self.step += 1
         self.optimizer.zero_grad()
         inputs, targets = batch
@@ -117,7 +125,7 @@ class DefaultTrainer(BaseTrainer):
         # update the metrics calculation
         return {'loss': loss, **metrics}
 
-    def val_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
+    def val_step(self, batch: tuple[torch.Tensor, ...]) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
             inputs, targets = batch
             inputs = inputs.to(self.device)
@@ -127,9 +135,8 @@ class DefaultTrainer(BaseTrainer):
             self.metrics(outputs, targets)
             return {"loss": loss}
 
-    def test_step(self, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
-        loss = self.val_step(batch)
-        return {"loss": loss}
+    def test_step(self, batch: tuple[torch.Tensor, ...]) ->  Dict[str, torch.Tensor]:
+        return self.val_step(batch)
 
     def fit(
             self,
@@ -142,6 +149,8 @@ class DefaultTrainer(BaseTrainer):
         best_val_loss = float("inf")
         self.model.train()
         self.model.to(self.device)
+        train_epoch_results = None
+        val_epoch_results = None
         for epoch in range(epochs):
             pbar = tqdm.tqdm(train_loader)
             train_epoch_loss = 0.0
@@ -183,10 +192,10 @@ class DefaultTrainer(BaseTrainer):
         self.loggers.close()
         print("Training Ends")
         assert train_epoch_results is not None, "Error in the training loop"
-        print(f"Training Results: {train_results}")
+        print(f"Training Results: {train_epoch_results}")
         if val_loader:
             assert val_epoch_results is not None, "Error in the validation loop"
-            print(f"Validation Results: {val_results}")
+            print(f"Validation Results: {val_epoch_results}")
         fitting_summary = {}
         try:
             fitting_summary = self.loggers._get_fitting_summary()
