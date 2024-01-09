@@ -1,3 +1,4 @@
+from cgi import test
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -94,8 +95,10 @@ class DefaultTrainer(BaseTrainer):
         if isinstance(to_log, torch.Tensor):
             return {f"{prefix}_loss": to_log}
         elif isinstance(to_log, dict):
-            return {f"{prefix}_{key}": value for key, value in to_log.items()}
-    
+            return {f"{prefix}_{key}": value.item() 
+                    if isinstance(value, torch.Tensor) 
+                    else value
+                    for key, value in to_log.items()}
     
     def log(self, 
             to_log:  Dict[str, torch.Tensor],
@@ -218,6 +221,8 @@ class DefaultTrainer(BaseTrainer):
         test_epoch_results["loss"] = test_epoch_loss / len(data_loader)
         self.log(test_epoch_results, stage="test", when="epoch")
         self.metrics.reset()
+        for k, v in test_epoch_results.items():
+            test_epoch_results[k] = v.item()
         print("Evaluation Ends")
         print(f"Test Results: {test_epoch_results}")
         return test_epoch_results

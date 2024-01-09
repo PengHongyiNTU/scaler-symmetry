@@ -10,7 +10,7 @@ from copy import deepcopy
 
 
 def get_all_activations(
-    model_builder: Callable,
+    model: nn.Module,
     state_dict: Dict[str, Any],
     val_loader: DataLoader,
     device: Literal["cpu", "cuda"],
@@ -27,25 +27,25 @@ def get_all_activations(
     Returns:
         A dictionary of activations
     """
-    model = model_builder()
     try:
         model.load_state_dict(state_dict)
     except Exception as e:
         raise Exception(f"Failed to load state dict: {e}") 
     activations_by_layers = {}
-    def get_layer_activations(
-        module: nn.Module, input: torch.Tensor, output: torch.Tensor
-    ):
-        layer_id = id(module)
-        layer_name = f"{module.__class__.__name__}_{layer_id}"
-        if layer_name not in activations_by_layers:
-            activations_by_layers[layer_name] = []
-        activations_by_layers[layer_name].append(output.cpu().detach())
+    from torch import Tensor
     hooks = []
     for depth, module in enumerate(model.modules()):
         if isinstance(module, activation_types):
+            def get_layer_activations(module: nn.Module, input: Tuple[Tensor, ...], output: Tensor):
+                layer_id = id(module)
+                layer_name = f"{module.__class__.__name__}_{layer_id}"
+                if layer_name not in activations_by_layers:
+                    activations_by_layers[layer_name] = []
+                activations_by_layers[layer_name].append(output.cpu().detach())
+
             hook = module.register_forward_hook(get_layer_activations)
             hooks.append(hook)
+
     # Forward pass
     model.to(device)
     model.eval()
@@ -125,8 +125,8 @@ def permutation_mapping(cost_matrix: np.ndarray
 
 
 def all_permutation_mappings(cost_matrices: List[np.ndarray],
-                             verbose: bool = False
-                             ) -> List[Tuple[np.ndarray, np.ndarray]]:
+                             verbose: bool = False,   
+                             ) -> List[np.ndarray]:
     """
     Compute all permutation mappings from a list of cost matrices.
     Args:
@@ -158,7 +158,7 @@ def model_permutation(
         The permuted model
     """
     linear_layers = []
-    for module in model.models():
+    for module in model.modules():
         if isinstance(module, nn.Linear):
             linear_layers.append(module)
     assert len(linear_layers) == len(permutation_mappings) + 1, (
@@ -171,6 +171,7 @@ def model_permutation(
             linear_layers[i].bias.data = linear_layers[i].bias.data[permutation]
         next_layer = linear_layers[i + 1]
         next_layer.weight.data = next_layer.weight.data[:, permutation]
+    model.to("cpu")
     new_state_dict = deepcopy(model.state_dict())
     return new_state_dict
 
@@ -181,17 +182,18 @@ def match_and_permute(
     state_dict_2: Dict[str, Any],
     val_loader: DataLoader,
     device: Literal["cpu", "cuda"],
-    activation_types: Union[type, Tuple[type, ...]]=(nn.ReLu, nn.Softmax),
+    activation_types: Union[type, Tuple[type, ...]]=(nn.ReLU, nn.Softmax),
 )-> Dict[str, torch.Tensor]:
+    model = model_builder()
     activations_1 = get_all_activations(
-        model_builder=model_builder,
+        model=model,
         state_dict=state_dict_1,
         val_loader=val_loader,
         device=device,
         activation_types=activation_types,
     )
     activations_2 = get_all_activations(
-        model_builder=model_builder,
+        model=model,
         state_dict=state_dict_2,
         val_loader=val_loader,
         device=device,

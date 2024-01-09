@@ -16,6 +16,7 @@ class TaskResults(NamedTuple):
 
 
 class SpecGenerator(ABC):
+    @abstractmethod
     def __iter__(self):
         return self
     

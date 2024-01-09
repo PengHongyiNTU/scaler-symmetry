@@ -50,7 +50,7 @@ class CSVLogger(BaseLogger):
         self.saving_dir = saving_dir
         self.name = name
         self.buffer_interval = buffer_interval
-        self.path = os.path.join(self.saving_dir, self.name)
+        self.path = os.path.join(self.saving_dir, self.name) + ".csv"
         self.current_step = -1
         self.header = ["step"]
         self.rows = []

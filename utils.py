@@ -2,8 +2,17 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torchvision import datasets
-from typing import Literal, Tuple
+from typing import Literal, Tuple, List
 import torchvision.transforms.v2 as transforms
+
+
+
+def prepare_sns():
+    import seaborn as sns
+    sns.set_style("whitegrid")
+    sns.set_context("paper")
+    sns.set(font='DejaVu Serif', font_scale=1)
+    
 
 
 def build_mlp_model(hidden_dimension: int = 128) -> nn.Module:
@@ -84,3 +93,33 @@ def prepare_dataset(
         raise ValueError(f"Unknown dataset name: {dataset_name}")
     return trainset, testset
 
+def parameter_wise_difference(
+    models_state_dict: List[dict], 
+    type: Literal["l1", "l2", "cos"] = "l1"
+):
+    diffs = {}
+    base_model_dict = models_state_dict[0]
+    # no gradient for this
+    with torch.no_grad():
+        for i, model_dict in enumerate(models_state_dict[1:]):
+            layer_wise_diffs = []
+
+            # iterate through each linear layer in the base model
+            for key in base_model_dict.keys():
+                if 'weight' in key or 'bias' in key:
+                    base_param = base_model_dict[key]
+                    param = model_dict[key]
+                    if type == "l1":
+                        diff = torch.norm(base_param - param, p=1)
+                    elif type == "l2":
+                        diff = torch.norm(base_param - param, p=2)
+                    elif type == "cos":
+                        cos_sim = torch.nn.functional.cosine_similarity(
+                            base_param.view(1, -1), param.view(1, -1), dim=1
+                        )
+                        diff = cos_sim.mean()
+                    else:
+                        raise ValueError(f"Unknown type: {type}")
+                    layer_wise_diffs.append(diff.item())
+            diffs[i + 1] = layer_wise_diffs
+    return diffs
