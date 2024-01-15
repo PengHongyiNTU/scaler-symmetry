@@ -241,7 +241,7 @@ class DefaultTrainer(BaseTrainer):
         return torch.cat(predictions, dim=0)
 
     def save(self) -> None:
-        path = os.path.join(self.saving_dir, self.saving_name)
+        path = os.path.join(self.saving_dir, self.saving_name) + ".pth"
         to_save = {
             "model_state_dict": self.model.to("cpu").state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),

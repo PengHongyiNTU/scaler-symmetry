@@ -7,6 +7,17 @@ import torchvision.transforms.v2 as transforms
 
 
 
+
+def initialization_with_seed(model: nn.Module, seed: int):
+    # initialize the weights of the model with the given seed
+    torch.manual_seed(seed)
+    for layer in model.modules():
+        if isinstance(layer, nn.Linear):
+            nn.init.kaiming_normal_(layer.weight)
+            nn.init.zeros_(layer.bias)
+    return model
+
+
 def prepare_sns():
     import seaborn as sns
     sns.set_style("whitegrid")

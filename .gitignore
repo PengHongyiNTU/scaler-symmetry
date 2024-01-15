@@ -3,6 +3,7 @@ data/
 different_dropout/
 different_initialization/
 different_reg_factors/
+different_niid_alphas/
 
 # Ignore files with .pkl extension
 pkl/

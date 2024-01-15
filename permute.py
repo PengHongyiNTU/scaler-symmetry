@@ -1,10 +1,15 @@
+from re import M
+import stat
 from typing import Callable, Tuple, Dict, Any, Literal,  Union, List
+from scipy import optimize
 from torch.utils.data import DataLoader
 import torch
 import torch.nn as nn
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from copy import deepcopy
+
+from traitlets import Bool
 
 
 
@@ -125,7 +130,7 @@ def permutation_mapping(cost_matrix: np.ndarray
 
 
 def all_permutation_mappings(cost_matrices: List[np.ndarray],
-                             verbose: bool = False,   
+                             verbose: bool = True,   
                              ) -> List[np.ndarray]:
     """
     Compute all permutation mappings from a list of cost matrices.
@@ -142,7 +147,9 @@ def all_permutation_mappings(cost_matrices: List[np.ndarray],
             cost_after = cost_matrix[row_ind, col_ind].sum()
             print(f"Layer {i}: Cost before: {cost_before}, Cost after: {cost_after}")
         permutation_mappings.append(col_ind)
-    return permutation_mappings
+    last_layer_mapping = permutation_mappings[-1]
+    # it should be the default order 
+    return permutation_mappings[:-1]
 
 
 def model_permutation(
@@ -158,12 +165,10 @@ def model_permutation(
         The permuted model
     """
     linear_layers = []
+    print(permutation_mappings)
     for module in model.modules():
         if isinstance(module, nn.Linear):
             linear_layers.append(module)
-    assert len(linear_layers) == len(permutation_mappings) + 1, (
-        "Number of linear layers must be equal to the number of permutation mappings + 1"
-    )
     for i in range(len(linear_layers) - 1):
         permutation = permutation_mappings[i]
         linear_layers[i].weight.data = linear_layers[i].weight.data[permutation]
@@ -207,3 +212,168 @@ def match_and_permute(
     return new_state_dict
     
   
+  
+if __name__ == "__main__":
+    
+    def sanity_check():
+        import torch 
+        import torch.nn as nn
+        from utils import prepare_dataset, build_mlp_model
+        from torch.utils.data import DataLoader
+        from torchmetrics import Accuracy
+        from tqdm import tqdm
+        accuracy = Accuracy(task="multiclass", num_classes=10)
+        accuracy = accuracy.to("cuda")
+        trainset, testset = prepare_dataset("MNIST", model_type="MLP")
+        def train(model: nn.Module, 
+                  train_loader: DataLoader, 
+                  optimizer: torch.optim.Optimizer, 
+                  criterion: nn.Module,
+                  epoch: int, 
+                  max_epochs: int, 
+                  device: Literal["cpu", "cuda"]):
+            model.train()
+            model.to(device)
+            total_loss = 0
+            pbar = tqdm(train_loader)
+            for inputs, targets in pbar:
+                inputs = inputs.to(device)
+                targets = targets.to(device)
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                total_loss += loss.item()
+                acc = accuracy(outputs, targets)
+                loss.backward()
+                optimizer.step()
+                pbar.set_description(f"Epoch: {epoch}/{max_epochs}, Step Loss: {loss.item():.4f}, Step Acc: {acc.item():.4f}")
+            return {'Train Loss': total_loss/len(train_loader), 
+                    'Train Acc': accuracy.compute().item()}
+                
+                
+        def test(model: nn.Module, 
+                 test_loader: DataLoader, 
+                 criterion: nn.Module, 
+                 device: Literal["cpu", "cuda"]):
+            model.eval()
+            model.to(device)
+            total_loss = 0
+            pbar = tqdm(test_loader)
+            with torch.no_grad():
+                for inputs, targets in pbar:
+                    inputs = inputs.to(device)
+                    targets = targets.to(device)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    total_loss += loss.item()
+                    accuracy(outputs, targets)
+            return {'Testl Loss': total_loss/len(test_loader),
+                    'Test Acc': accuracy.compute().item()}
+
+        MAX_EPOCHS = 5
+        TRAIN_BATCH_SIZE = 2048
+        TEST_BATCH_SIZE = 1000
+        
+        model_1 = build_mlp_model()
+        model_2 = build_mlp_model()
+
+        criterion = nn.CrossEntropyLoss()
+        from utils import initialization_with_seed
+        model_1 = initialization_with_seed(model_1, seed=0)
+        model_2 = initialization_with_seed(model_2, seed=42)
+        def check_weight_eqaul(state_dict_1, state_dict_2) -> bool:
+            for key in state_dict_1:
+                if not torch.allclose(state_dict_1[key], state_dict_2[key]):
+                    return False
+            return True
+        print(check_weight_eqaul(model_1.state_dict(), model_2.state_dict()))
+        from pytorch_lightning import seed_everything
+        seed_everything(0)
+        train_loader = DataLoader(trainset, batch_size=TRAIN_BATCH_SIZE, shuffle=True)
+        test_loader = DataLoader(testset, batch_size=TEST_BATCH_SIZE, shuffle=False)
+        optimizer = torch.optim.Adam(model_1.parameters(), lr=1e-1)
+        optimizer2 = torch.optim.Adam(model_2.parameters(), lr=1e-1)
+        for epoch in range(MAX_EPOCHS):
+            train(model_1, 
+                  train_loader, 
+                  optimizer, 
+                  criterion, 
+                  epoch, 
+                  MAX_EPOCHS,
+                  device='cuda')
+        results = test(model_1, test_loader, criterion, device='cuda')
+        print(f"Model 1: {results}")
+        for epoch in range(MAX_EPOCHS):
+            train(model_2, 
+                  train_loader, 
+                  optimizer2, 
+                  criterion, 
+                  epoch, 
+                  MAX_EPOCHS,
+                  device='cuda')
+        results = test(model_2, test_loader, criterion, device='cuda')
+        print(f"Model 2: {results}")
+        state_dict_1 = model_1.state_dict()
+        state_dict_2 = model_2.state_dict()
+        print("Without Permutation")
+        alphas = [0.5]
+        from interpolate import interpolate_weights
+        row_records = []
+        valloader = DataLoader(torch.utils.data.Subset(testset, range(100)),
+                               batch_size=TEST_BATCH_SIZE, 
+                               shuffle=False)
+        for alpha in alphas:
+            new_state_dict = interpolate_weights(state_dict_1, 
+                                                state_dict_2, 
+                                                alpha)
+            model_1.load_state_dict(new_state_dict)
+            results = test(model_1, 
+                           test_loader,
+                           criterion, 
+                           device='cuda')
+            row_records.append(
+                {
+                    "alpha": alpha,
+                    "Test Acc": results["Test Acc"],
+                    "Test Loss": results["Testl Loss"],
+                    'with permutation': False  
+                }
+            )
+            state_dict_2 = match_and_permute(model_builder=build_mlp_model,
+                            state_dict_1=state_dict_1,
+                            state_dict_2=state_dict_2,
+                            val_loader=valloader,
+                            device='cuda')
+            permuted_new_state_dict = interpolate_weights(state_dict_1,
+                                                            state_dict_2,
+                                                            alpha)
+            model_1.load_state_dict(permuted_new_state_dict)
+            results = test(model_1, 
+                           test_loader,
+                           criterion, 
+                           device='cuda')
+            row_records.append(
+                {
+                    "alpha": alpha,
+                    "Test Acc": results["Test Acc"],
+                    "Test Loss": results["Testl Loss"],
+                    'with permutation': True  
+                }
+            )
+        import pandas as pd
+        df = pd.DataFrame(row_records)
+        df.to_csv("sanity_check.csv", index=False)
+        print("Done")
+        
+    from utils import build_mlp_model
+    # model = build_mlp_model()
+    # dummy_data = torch.randn(100, 784)
+    # out = model(dummy_data)
+    # print(out.shape)
+    sanity_check()
+                    
+        
+            
+            
+            
+        
