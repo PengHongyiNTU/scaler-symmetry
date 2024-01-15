@@ -270,8 +270,8 @@ if __name__ == "__main__":
             return {'Testl Loss': total_loss/len(test_loader),
                     'Test Acc': accuracy.compute().item()}
 
-        MAX_EPOCHS = 5
-        TRAIN_BATCH_SIZE = 2048
+        MAX_EPOCHS = 10
+        TRAIN_BATCH_SIZE = 1024
         TEST_BATCH_SIZE = 1000
         
         model_1 = build_mlp_model()
@@ -339,13 +339,13 @@ if __name__ == "__main__":
                     'with permutation': False  
                 }
             )
-            state_dict_2 = match_and_permute(model_builder=build_mlp_model,
+            permuted_state_dict_2 = match_and_permute(model_builder=build_mlp_model,
                             state_dict_1=state_dict_1,
                             state_dict_2=state_dict_2,
                             val_loader=valloader,
                             device='cuda')
             permuted_new_state_dict = interpolate_weights(state_dict_1,
-                                                            state_dict_2,
+                                                            permuted_state_dict_2,
                                                             alpha)
             model_1.load_state_dict(permuted_new_state_dict)
             results = test(model_1, 
